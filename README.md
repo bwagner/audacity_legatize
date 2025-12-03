@@ -163,6 +163,5 @@ Issues and pull requests are welcome! Please ensure:
 
 MIT License - see LICENSE file for details
 
-## Author
-
-Created for making Audacity label editing workflows more efficient.
+## See Also
+[shift_labels](https://github.com/bwagner/shift_labels), [quantize_labels](https://github.com/bwagner/quantize_labels), [beats2bars](https://github.com/bwagner/beats2bars), [pyaudacity](https://github.com/bwagner/pyaudacity)
