@@ -165,7 +165,7 @@ MIT License - see LICENSE file for details
 
 ## See Also
 - [rebuildap](https://github.com/bwagner/rebuildap)
-- [shift_labels](https://github.com/bwagner/shift_labels)
+- [audacity_shift_labels](https://github.com/bwagner/audacity_shift_labels)
 - [audacity_click_label](https://github.com/bwagner/audacity_click_label)
 - [quantize_labels](https://github.com/bwagner/quantize_labels)
 - [beats2bars](https://github.com/bwagner/beats2bars)
