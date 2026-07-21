@@ -15,12 +15,28 @@ t1  t2  l1
 t2  t3  l2
 t3  t4
 t4  t5
-t5
+
+The trailing t5 is a sentinel: its only purpose in the input was to supply an
+end time for the label before it, so by default it is dropped from the output.
+Pass --keep-sentinel to emit it as a bare point label instead.
+
+A sentinel is the last label when its start equals its end. A trailing range
+label is a real label and is never dropped, and a lone label is never dropped.
+If the sentinel carries text, that text is appended to the preceding label:
+
+t1  t1  l1
+t2  t2  end
+becomes:
+t1  t2  l1 end
 """
 
 import argparse
 import fileinput
 from typing import List, Tuple, Optional
+
+# Joins a sentinel's text onto the preceding label's text when the sentinel is
+# dropped. A space keeps the result a single Audacity label field.
+SENTINEL_TEXT_SEPARATOR = ' '
 
 def parse_label_line(line: str) -> Tuple[float, float, Optional[str]]:
     """Parse a single Audacity label line."""
@@ -41,7 +57,30 @@ def parse_label_line(line: str) -> Tuple[float, float, Optional[str]]:
     except ValueError:
         return None
 
-def legatize_labels(labels: List[Tuple[float, float, Optional[str]]]) -> List[Tuple[float, float, Optional[str]]]:
+def drop_trailing_sentinel(labels: List[Tuple[float, float, Optional[str]]]) -> List[Tuple[float, float, Optional[str]]]:
+    """Drop a trailing point label, folding its text into the preceding label.
+
+    The last label is a sentinel only if it is a point (start == end) and
+    something precedes it. A trailing range label is a real label, and a lone
+    label has nothing to fold into, so both are returned untouched.
+    """
+    if len(labels) < 2:
+        return labels
+
+    start, end, text = labels[-1]
+    if start != end:
+        return labels
+
+    result = labels[:-1]
+    if text is not None:
+        prev_start, prev_end, prev_text = result[-1]
+        merged = text if prev_text is None else prev_text + SENTINEL_TEXT_SEPARATOR + text
+        result[-1] = (prev_start, prev_end, merged)
+
+    return result
+
+def legatize_labels(labels: List[Tuple[float, float, Optional[str]]],
+                    drop_sentinel: bool = True) -> List[Tuple[float, float, Optional[str]]]:
     """Convert point labels to legato (continuous) labels."""
     if not labels:
         return []
@@ -51,15 +90,16 @@ def legatize_labels(labels: List[Tuple[float, float, Optional[str]]]) -> List[Tu
         start_time = labels[i][0]
         label_text = labels[i][2]
 
-        # Extend to the start of the next label, or keep the same time for the last one
+        # Extend to the start of the next label; the last one keeps its own end
         if i < len(labels) - 1:
             end_time = labels[i + 1][0]
         else:
-            # For the last label, check if it already has a different end time
-            # If it's a point label (start == end), keep it as is
-            end_time = labels[i][1] if labels[i][0] != labels[i][1] else labels[i][0]
+            end_time = labels[i][1]
 
         result.append((start_time, end_time, label_text))
+
+    if drop_sentinel:
+        result = drop_trailing_sentinel(result)
 
     return result
 
@@ -80,11 +120,14 @@ def main():
   %(prog)s                           # Read from stdin, write to stdout
   %(prog)s input.txt                 # Read from file, write to stdout
   %(prog)s input.txt output.txt      # Read from file, write to file
-  %(prog)s -i input.txt              # Modify input.txt in place"""
+  %(prog)s -i input.txt              # Modify input.txt in place
+  %(prog)s -k input.txt              # Keep the trailing sentinel label"""
     )
 
     parser.add_argument('-i', '--in-place', action='store_true',
                         help='Edit input file in place')
+    parser.add_argument('-k', '--keep-sentinel', action='store_true',
+                        help='Keep the trailing point label instead of dropping it')
     parser.add_argument('input_file', nargs='?',
                         help='Input file (default: stdin)')
     parser.add_argument('output_file', nargs='?',
@@ -110,7 +153,7 @@ def main():
                 labels.append(parsed)
 
     # Convert to legato
-    legato_labels = legatize_labels(labels)
+    legato_labels = legatize_labels(labels, drop_sentinel=not args.keep_sentinel)
 
     # Output
     if args.output_file:

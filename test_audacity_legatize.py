@@ -15,7 +15,12 @@ from pathlib import Path
 
 # Import the functions from the main script
 # (assumes audacity_legatize.py is in the same directory)
-from audacity_legatize import parse_label_line, legatize_labels, format_label
+from audacity_legatize import (
+    parse_label_line,
+    legatize_labels,
+    format_label,
+    drop_trailing_sentinel,
+)
 
 class TestParseLabelLine:
     """Test the label line parsing function."""
@@ -57,25 +62,25 @@ class TestParseLabelLine:
 
 
 class TestLegatizeLabels:
-    """Test the legato conversion logic."""
-    
+    """Test the legato conversion logic, with the sentinel left in place."""
+
     def test_empty_input(self):
         """Test with empty label list."""
         result = legatize_labels([])
         assert result == []
-    
+
     def test_single_point_label(self):
         """Test with a single point label."""
         input_labels = [(1.0, 1.0, "Label1")]
-        result = legatize_labels(input_labels)
+        result = legatize_labels(input_labels, drop_sentinel=False)
         assert result == [(1.0, 1.0, "Label1")]
-    
+
     def test_single_range_label(self):
         """Test with a single range label."""
         input_labels = [(1.0, 2.0, "Label1")]
-        result = legatize_labels(input_labels)
+        result = legatize_labels(input_labels, drop_sentinel=False)
         assert result == [(1.0, 2.0, "Label1")]
-    
+
     def test_multiple_point_labels(self):
         """Test converting multiple point labels to legato."""
         input_labels = [
@@ -88,9 +93,9 @@ class TestLegatizeLabels:
             (2.0, 3.0, "Label2"),
             (3.0, 3.0, "Label3")
         ]
-        result = legatize_labels(input_labels)
+        result = legatize_labels(input_labels, drop_sentinel=False)
         assert result == expected
-    
+
     def test_mixed_labels(self):
         """Test with mix of point and range labels."""
         input_labels = [
@@ -103,9 +108,9 @@ class TestLegatizeLabels:
             (2.0, 3.0, "Label2"),
             (3.0, 3.0, None)
         ]
-        result = legatize_labels(input_labels)
+        result = legatize_labels(input_labels, drop_sentinel=False)
         assert result == expected
-    
+
     def test_labels_without_text(self):
         """Test labels that have no text."""
         input_labels = [
@@ -118,9 +123,9 @@ class TestLegatizeLabels:
             (2.0, 3.0, None),
             (3.0, 3.0, None)
         ]
-        result = legatize_labels(input_labels)
+        result = legatize_labels(input_labels, drop_sentinel=False)
         assert result == expected
-    
+
     def test_preserves_last_range(self):
         """Test that the last label preserves its range if it has one."""
         input_labels = [
@@ -131,8 +136,103 @@ class TestLegatizeLabels:
             (1.0, 2.0, "Label1"),
             (2.0, 4.0, "Label2")
         ]
-        result = legatize_labels(input_labels)
+        result = legatize_labels(input_labels, drop_sentinel=False)
         assert result == expected
+
+
+class TestDropTrailingSentinel:
+    """Test sentinel removal in isolation."""
+
+    def test_empty(self):
+        """Test that an empty list is returned untouched."""
+        assert drop_trailing_sentinel([]) == []
+
+    def test_lone_point_is_kept(self):
+        """Test that a single label is never dropped, even as a point."""
+        assert drop_trailing_sentinel([(1.0, 1.0, None)]) == [(1.0, 1.0, None)]
+
+    def test_drops_textless_point(self):
+        """Test that a bare trailing point is removed."""
+        labels = [(1.0, 2.0, "Label1"), (2.0, 2.0, None)]
+        assert drop_trailing_sentinel(labels) == [(1.0, 2.0, "Label1")]
+
+    def test_trailing_range_is_kept(self):
+        """Test that a trailing range label is a real label, not a sentinel."""
+        labels = [(1.0, 2.0, "Label1"), (2.0, 4.0, None)]
+        assert drop_trailing_sentinel(labels) == labels
+
+    def test_appends_sentinel_text_to_previous(self):
+        """Test that sentinel text is folded into the preceding label."""
+        labels = [(1.0, 2.0, "Label1"), (2.0, 2.0, "end")]
+        assert drop_trailing_sentinel(labels) == [(1.0, 2.0, "Label1 end")]
+
+    def test_appends_to_textless_previous(self):
+        """Test folding sentinel text into a label that has none."""
+        labels = [(1.0, 2.0, None), (2.0, 2.0, "end")]
+        assert drop_trailing_sentinel(labels) == [(1.0, 2.0, "end")]
+
+    def test_does_not_mutate_input(self):
+        """Test that the caller's list is left alone."""
+        labels = [(1.0, 2.0, "Label1"), (2.0, 2.0, "end")]
+        original = list(labels)
+        drop_trailing_sentinel(labels)
+        assert labels == original
+
+
+class TestLegatizeDropsSentinel:
+    """Test the default end-to-end behaviour of legatize_labels."""
+
+    def test_single_column_input(self):
+        """Test the bare-timestamp case: the trailing point disappears."""
+        input_labels = [
+            (1.0, 1.0, None),
+            (2.0, 2.0, None),
+            (3.0, 3.0, None)
+        ]
+        expected = [
+            (1.0, 2.0, None),
+            (2.0, 3.0, None)
+        ]
+        assert legatize_labels(input_labels) == expected
+
+    def test_sentinel_text_is_appended(self):
+        """Test that a labelled sentinel donates its text before vanishing."""
+        input_labels = [
+            (1.0, 1.0, "Label1"),
+            (2.0, 2.0, "Label2"),
+            (3.0, 3.0, "end")
+        ]
+        expected = [
+            (1.0, 2.0, "Label1"),
+            (2.0, 3.0, "Label2 end")
+        ]
+        assert legatize_labels(input_labels) == expected
+
+    def test_lone_label_survives(self):
+        """Test that a single point label is not dropped."""
+        assert legatize_labels([(1.0, 1.0, "Label1")]) == [(1.0, 1.0, "Label1")]
+
+    def test_trailing_range_survives(self):
+        """Test that a trailing range label is not treated as a sentinel."""
+        input_labels = [
+            (1.0, 1.0, "Label1"),
+            (2.0, 4.0, "Label2")
+        ]
+        expected = [
+            (1.0, 2.0, "Label1"),
+            (2.0, 4.0, "Label2")
+        ]
+        assert legatize_labels(input_labels) == expected
+
+    def test_idempotent(self):
+        """Test that re-legatizing the output changes nothing further."""
+        input_labels = [
+            (1.0, 1.0, None),
+            (2.0, 2.0, None),
+            (3.0, 3.0, None)
+        ]
+        once = legatize_labels(input_labels)
+        assert legatize_labels(once) == once
 
 
 class TestFormatLabel:
@@ -170,62 +270,107 @@ class TestIntegration:
     def test_stdin_stdout(self, script_path):
         """Test reading from stdin and writing to stdout."""
         input_data = "1.0\t1.0\tLabel1\n2.0\t2.0\tLabel2\n3.0\t3.0\tLabel3\n"
-        expected = "1.0\t2.0\tLabel1\n2.0\t3.0\tLabel2\n3.0\t3.0\tLabel3\n"
-        
+        expected = "1.0\t2.0\tLabel1\n2.0\t3.0\tLabel2 Label3\n"
+
         result = subprocess.run(
             [sys.executable, str(script_path)],
             input=input_data,
             capture_output=True,
             text=True
         )
-        
+
         assert result.returncode == 0
         assert result.stdout == expected
-    
+
+    def test_stdin_stdout_keep_sentinel(self, script_path):
+        """Test that -k restores the trailing point label."""
+        input_data = "1.0\t1.0\tLabel1\n2.0\t2.0\tLabel2\n3.0\t3.0\tLabel3\n"
+        expected = "1.0\t2.0\tLabel1\n2.0\t3.0\tLabel2\n3.0\t3.0\tLabel3\n"
+
+        result = subprocess.run(
+            [sys.executable, str(script_path), "-k"],
+            input=input_data,
+            capture_output=True,
+            text=True
+        )
+
+        assert result.returncode == 0
+        assert result.stdout == expected
+
+    def test_single_column_input(self, script_path):
+        """Test bare timestamps: the trailing sentinel is dropped."""
+        input_data = "1.0\n2.0\n3.0\n4.0\n"
+        expected = "1.0\t2.0\n2.0\t3.0\n3.0\t4.0\n"
+
+        result = subprocess.run(
+            [sys.executable, str(script_path)],
+            input=input_data,
+            capture_output=True,
+            text=True
+        )
+
+        assert result.returncode == 0
+        assert result.stdout == expected
+
     def test_file_input(self, script_path, tmp_path):
         """Test reading from a file."""
         input_file = tmp_path / "input.txt"
         input_file.write_text("1.0\t1.0\tLabel1\n2.0\t2.0\tLabel2\n")
-        
+
         result = subprocess.run(
             [sys.executable, str(script_path), str(input_file)],
             capture_output=True,
             text=True
         )
-        
+
         assert result.returncode == 0
-        assert result.stdout == "1.0\t2.0\tLabel1\n2.0\t2.0\tLabel2\n"
-    
+        assert result.stdout == "1.0\t2.0\tLabel1 Label2\n"
+
     def test_file_output(self, script_path, tmp_path):
         """Test writing to an output file."""
         input_file = tmp_path / "input.txt"
         output_file = tmp_path / "output.txt"
         input_file.write_text("1.0\t1.0\tLabel1\n2.0\t2.0\tLabel2\n")
-        
+
         result = subprocess.run(
             [sys.executable, str(script_path), str(input_file), str(output_file)],
             capture_output=True,
             text=True
         )
-        
+
         assert result.returncode == 0
-        assert output_file.read_text() == "1.0\t2.0\tLabel1\n2.0\t2.0\tLabel2\n"
-    
+        assert output_file.read_text() == "1.0\t2.0\tLabel1 Label2\n"
+
     def test_in_place_editing(self, script_path, tmp_path):
         """Test in-place file editing."""
         input_file = tmp_path / "input.txt"
         original_content = "1.0\t1.0\tLabel1\n2.0\t2.0\tLabel2\n3.0\t3.0\tLabel3\n"
         input_file.write_text(original_content)
-        
+
         result = subprocess.run(
             [sys.executable, str(script_path), "-i", str(input_file)],
             capture_output=True,
             text=True
         )
-        
+
+        assert result.returncode == 0
+        assert input_file.read_text() == "1.0\t2.0\tLabel1\n2.0\t3.0\tLabel2 Label3\n"
+
+    def test_in_place_editing_keep_sentinel(self, script_path, tmp_path):
+        """Test that -i and -k combine."""
+        input_file = tmp_path / "input.txt"
+        input_file.write_text("1.0\t1.0\tLabel1\n2.0\t2.0\tLabel2\n3.0\t3.0\tLabel3\n")
+
+        result = subprocess.run(
+            [sys.executable, str(script_path), "-i", "-k", str(input_file)],
+            capture_output=True,
+            text=True
+        )
+
         assert result.returncode == 0
         assert input_file.read_text() == "1.0\t2.0\tLabel1\n2.0\t3.0\tLabel2\n3.0\t3.0\tLabel3\n"
-    
+
+
     def test_error_in_place_without_file(self, script_path):
         """Test that in-place without input file fails."""
         result = subprocess.run(
@@ -269,17 +414,53 @@ class TestIntegration:
     def test_complex_example(self, script_path):
         """Test the example from the docstring."""
         input_data = "1.0\t1.0\tl1\n2.0\t2.0\tl2\n3.0\t3.0\n4.0\n5.0\n"
-        expected = "1.0\t2.0\tl1\n2.0\t3.0\tl2\n3.0\t4.0\n4.0\t5.0\n5.0\n"
-        
+        expected = "1.0\t2.0\tl1\n2.0\t3.0\tl2\n3.0\t4.0\n4.0\t5.0\n"
+
         result = subprocess.run(
             [sys.executable, str(script_path)],
             input=input_data,
             capture_output=True,
             text=True
         )
-        
+
         assert result.returncode == 0
         assert result.stdout == expected
+
+    def test_complex_example_keep_sentinel(self, script_path):
+        """Test the docstring example with the sentinel retained."""
+        input_data = "1.0\t1.0\tl1\n2.0\t2.0\tl2\n3.0\t3.0\n4.0\n5.0\n"
+        expected = "1.0\t2.0\tl1\n2.0\t3.0\tl2\n3.0\t4.0\n4.0\t5.0\n5.0\n"
+
+        result = subprocess.run(
+            [sys.executable, str(script_path), "-k"],
+            input=input_data,
+            capture_output=True,
+            text=True
+        )
+
+        assert result.returncode == 0
+        assert result.stdout == expected
+
+    def test_round_trip_is_stable(self, script_path):
+        """Test that feeding the output back in changes nothing further."""
+        input_data = "1.0\n2.0\n3.0\n4.0\n"
+
+        first = subprocess.run(
+            [sys.executable, str(script_path)],
+            input=input_data,
+            capture_output=True,
+            text=True
+        )
+        second = subprocess.run(
+            [sys.executable, str(script_path)],
+            input=first.stdout,
+            capture_output=True,
+            text=True
+        )
+
+        assert first.returncode == 0
+        assert second.returncode == 0
+        assert second.stdout == first.stdout
 
 
 class TestEdgeCases:
@@ -293,7 +474,7 @@ class TestEdgeCases:
             (1.0, 1.0, "Label1"),
             (3.0, 3.0, "Label3")
         ]
-        result = legatize_labels(input_labels)
+        result = legatize_labels(input_labels, drop_sentinel=False)
         # Current implementation doesn't sort
         expected = [
             (2.0, 1.0, "Label2"),  # This might be unexpected!
@@ -309,7 +490,7 @@ class TestEdgeCases:
             (1.0, 1.0, "Label2"),
             (2.0, 2.0, "Label3")
         ]
-        result = legatize_labels(input_labels)
+        result = legatize_labels(input_labels, drop_sentinel=False)
         expected = [
             (1.0, 1.0, "Label1"),
             (1.0, 2.0, "Label2"),

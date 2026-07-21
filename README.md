@@ -19,10 +19,11 @@ Transforms Audacity label tracks from point labels (instantaneous markers) to ra
 1.0    2.5    Verse
 2.5    4.0    Chorus
 4.0    5.5    Bridge
-5.5
 ```
 
 Each label now extends until the start of the next label, creating a continuous (legato) sequence with no gaps.
+
+The trailing `5.5` is gone. Its only job in the input was to supply an end time for `Bridge`, so once that end time is assigned it carries no information - keeping it would leave a stray zero-length label at the end of your track. Pass `-k` if you want it back.
 
 ## Installation
 
@@ -56,6 +57,9 @@ python audacity_legatize.py input.txt
 # Modify file in place
 ./audacity_legatize.py -i input.txt
 
+# Keep the trailing sentinel label
+./audacity_legatize.py -k input.txt
+
 # Show help
 ./audacity_legatize.py -h
 ```
@@ -63,6 +67,31 @@ python audacity_legatize.py input.txt
 ## Options
 
 - `-i, --in-place`: Edit the input file in place (cannot be used with stdin or when output file is specified)
+- `-k, --keep-sentinel`: Keep the trailing point label instead of dropping it
+
+## The trailing sentinel
+
+Point-label input usually ends with one marker more than there are labels - the final marker exists only to close off the last real label. After legatizing it has served its purpose, so by default it is dropped.
+
+A label counts as a sentinel only if it is the **last** label and its start equals its end. Two things are therefore never dropped:
+
+- a trailing **range** label, which is a real label with a duration of its own
+- a **lone** label, since there is nothing to legatize and nothing to fold it into
+
+If the sentinel carries text, that text is appended to the preceding label rather than discarded, separated by a space:
+
+```
+1.0    1.0    Bridge
+5.5    5.5    fine
+```
+becomes
+```
+1.0    5.5    Bridge fine
+```
+
+Note that this means a trailing point label that you meant to keep - `70.2 70.2 Outro` with no terminator after it - will be absorbed into the label before it. Use `-k` for such files.
+
+Dropping the sentinel is idempotent: re-running the tool on its own output changes nothing, because the last label is then a range and is no longer treated as a sentinel.
 
 ## Input Format
 
@@ -103,8 +132,9 @@ Output file `output.txt`:
 40.0   55.5   Verse 2
 55.5   70.2   Chorus
 70.2   85.0   Outro
-85.0
 ```
+
+With `-k`, the closing `85.0` marker is retained as a final point label.
 
 ### Pipeline usage
 
@@ -141,6 +171,7 @@ python -m pytest test_audacity_legatize.py --cov=audacity_legatize --cov-report=
 
 ## Notes
 
+- The trailing sentinel label is dropped by default; see [The trailing sentinel](#the-trailing-sentinel)
 - The script preserves the last label's duration if it already has a range
 - Labels without text are supported and remain without text after conversion
 - Empty lines and invalid entries are skipped
